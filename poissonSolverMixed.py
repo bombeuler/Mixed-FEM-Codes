@@ -182,9 +182,23 @@ class PoissonSolverMixed:
             raise ReferenceError("必顿先解出uh才能保存数据")
         else:
             path = f"./Storage/{filename}.mat"
-            parseFemData(self.uh, path,saved=True)
+            parseFemData(self.uh.collapse(), path,saved=True)
 
-    # 画uh的图像
+    def saveError(self,filename):
+        if self.uh is None:
+            raise ReferenceError("必顿先解出uh才能保存数据")
+        else:
+            path = f"./Storage/{filename}_errors.mat"
+            uhc = self.uh.collapse()
+            W = uhc.function_space
+            x = SpatialCoordinate(W.mesh)
+            eh = fem.Function(W)
+            uex = fem.Function(W)
+            uex.interpolate(fem.Expression(self.u_exact(x),W.element.interpolation_points()))
+            eh.x.array[:] = uhc.x.array - uex.x.array
+            
+            parseFemData(eh, path,saved=True)
+
     def plotPiecewise(self, filename=None):
         plotter = pv.Plotter(window_size=(1200, 1200))
         plotPiecewiseFunc(self.uh, plotter)
