@@ -25,16 +25,16 @@ import gmsh
 
 from untils.plotPiecewiseFunc import plotPiecewiseFunc
 
-from untils.gmshDomain import lshape_nonsymm
+from untils.gmshDomain import lshape,lshape_nonsymm
 
 from untils.pyvistaParameter import setPlotterParameter
 from untils.parseFemData import parseFemData
 
 
-class PoissonSolverMixed:
+class RevisionSolverMixed:
     # 对象实例化
     def __init__(
-        self, domain, degree, element1Family, element2Family, gn=None, u_exact=None
+        self, domain, degree, element1Family, element2Family, gn=None,pgn=None, u_exact=None
     ):
         self.domain = domain
         x = SpatialCoordinate(self.domain)
@@ -53,27 +53,28 @@ class PoissonSolverMixed:
         self.u_exact = u_exact
         self.f = fem.Constant(self.domain, default_scalar_type(0))
         self.gn = gn
+        self.pgn = pgn
 
     @staticmethod
-    def fromNCube(n, degree, element1Family, element2Family, gn=None, u_exact=None):
+    def fromNCube(n, degree, element1Family, element2Family, gn=None,pgn=None, u_exact=None):
         domain = mesh.create_unit_cube(
             MPI.COMM_WORLD, n, n, n, mesh.CellType.tetrahedron
         )
-        return PoissonSolverMixed(
-            domain, degree, element1Family, element2Family, gn, u_exact
+        return RevisionSolverMixed(
+            domain, degree, element1Family, element2Family, gn,pgn, u_exact
         )
 
     # 指定n实例单位方形区域
     @staticmethod
-    def fromNSquare(n, degree, element1Family, element2Family, gn=None, u_exact=None):
+    def fromNSquare(n, degree, element1Family, element2Family, gn=None,pgn=None, u_exact=None):
         domain = mesh.create_unit_square(MPI.COMM_WORLD, n, n, mesh.CellType.triangle)
-        return PoissonSolverMixed(
-            domain, degree, element1Family, element2Family, gn, u_exact
+        return RevisionSolverMixed(
+            domain, degree, element1Family, element2Family, gn,pgn, u_exact
         )
 
     @staticmethod
     def fromNRectangle(
-        n, degree, element1Family, element2Family, gn=None, u_exact=None
+        n, degree, element1Family, element2Family, gn=None, pgn=None,u_exact=None
     ):
         domain = mesh.create_rectangle(
             MPI.COMM_WORLD,
@@ -81,13 +82,13 @@ class PoissonSolverMixed:
             (2 * n, n),
             mesh.CellType.triangle,
         )
-        return PoissonSolverMixed(
-            domain, degree, element1Family, element2Family, gn, u_exact
+        return RevisionSolverMixed(
+            domain, degree, element1Family, element2Family, gn,pgn, u_exact
         )
 
     @staticmethod
     def fromLshapeGmsh(
-        n, degree, element1Family, element2Family, gn=None, u_exact=None
+        n, degree, element1Family, element2Family, gn=None,pgn=None, u_exact=None
     ):
         gmsh.initialize()
         if MPI.COMM_WORLD.rank == 0:
@@ -96,8 +97,8 @@ class PoissonSolverMixed:
         domain, _, _ = gmshio.model_to_mesh(model, MPI.COMM_WORLD, 0, gdim=2)
         gmsh.finalize()
         MPI.COMM_WORLD.barrier()
-        return PoissonSolverMixed(
-            domain, degree, element1Family, element2Family, gn, u_exact
+        return RevisionSolverMixed(
+            domain, degree, element1Family, element2Family, gn,pgn, u_exact
         )
 
 
@@ -143,27 +144,38 @@ class PoissonSolverMixed:
 
         a = inner(sigma, tau) * dx + inner(u, div(tau)) * dx + inner(div(sigma), v) * dx
         if isinstance(self.gn, ufl.Coefficient):
-            W, _ = self.V.sub(1).collapse()
+            # W, _ = self.V.sub(1).collapse()
+            W2 = functionspace(self.domain,("Lagrange", self.degree))
             nmm_data = create_nonmatching_meshes_interpolation_data(
-                self.domain, W.element, self.gn.function_space.mesh
+                self.domain, W2.element, self.gn.function_space.mesh
             )
-            gn = fem.Function(W)
+            gn = fem.Function(W2)
             gn.interpolate(self.gn, nmm_interpolation_data=nmm_data)
         else:
             gn = self.gn(x)
 
-        L = -inner(self.f, v) * dx + gn * inner(tau, n) * ds
-        return (a, L)
+        # W, _ = self.V.sub(1).collapse()
+        W2 = functionspace(self.domain,("Lagrange", self.degree))
+        # W2 = functionspace(self.domain, ("DG", self.degree - 1))
+        nmm_data = create_nonmatching_meshes_interpolation_data(
+                self.domain, W2.element, self.pgn.function_space.mesh
+            )
+        pgn = fem.Function(W2)
+        pgn.interpolate(self.pgn, nmm_interpolation_data=nmm_data)
+
+        L1 = -inner(self.f, v) * dx + gn * inner(tau, n) * ds
+        L2 = -inner(self.f, v) * dx + pgn * inner(tau, n) * ds
+        return (a, L1,L2)
 
     # 求解uh并且在对象中保存并返回uh
     def solve(self):
 
         # bcs = self.setDirichletBC()
-        a, L = self.setFemProblem()
+        a, L1,L2 = self.setFemProblem()
 
-        problem = LinearProblem(
+        problem1 = LinearProblem(
             a,
-            L,
+            L1,
             # bcs,
             petsc_options={
                 "ksp_type": "preonly",
@@ -171,11 +183,22 @@ class PoissonSolverMixed:
                 "pc_factor_mat_solver_type": "mumps",
             },
         )
-        wh = problem.solve()
-        sigmah, uh = wh.split()
-        self.wh = wh
-        self.sigmah, self.uh = sigmah, uh
-        return sigmah, uh, wh
+        problem2 = LinearProblem(
+            a,
+            L2,
+            # bcs,
+            petsc_options={
+                "ksp_type": "preonly",
+                "pc_type": "lu",
+                "pc_factor_mat_solver_type": "mumps",
+            },
+        )
+        wh1 = problem1.solve()
+        wh2 = problem2.solve()
+        sigmah1, uh1 = wh1.split()
+        sigmah2, uh2 = wh2.split()
+        self.sigmah1,self.uh1, self.sigmah2,self.uh2 = sigmah1.collapse(),uh1.collapse(),sigmah2.collapse(),uh2.collapse()
+        return sigmah1.collapse(),uh1.collapse(),sigmah2.collapse(),uh2.collapse()
 
     def saveMat(self, filename):
         if self.uh is None:
@@ -201,10 +224,10 @@ class PoissonSolverMixed:
 
     def plotPiecewise(self, filename=None):
         plotter = pv.Plotter(window_size=(1200, 1200))
-        plotPiecewiseFunc(self.uh, plotter)
+        plotPiecewiseFunc(self.uh2, plotter)
         # plotter.view_xy()
         # plotter.add_mesh(grid, show_edges=True)
-        setPlotterParameter(plotter, "bird-xy")
+        # setPlotterParameter(plotter, "bird-xy")
         plotter.set_scale(zscale=0.25)
         if pv.OFF_SCREEN:
             plotter.screenshot("uh_poisson.png")
@@ -217,9 +240,9 @@ class PoissonSolverMixed:
         VuP = functionspace(self.domain, ("CG", 1))
         VsP = functionspace(self.domain, ("CG", 1, (2,)))
         uhP = fem.Function(VuP)
-        uhP.interpolate(self.uh)
+        uhP.interpolate(self.uh2)
         sigmahP = fem.Function(VsP)
-        sigmahP.interpolate(self.sigmah)
+        sigmahP.interpolate(self.sigmah2)
 
         plotter = pv.Plotter(window_size=(1200, 1200))
 
@@ -228,10 +251,10 @@ class PoissonSolverMixed:
         grid = pv.UnstructuredGrid(cells, types, geometry)
         grid.point_data["u"] = uhP.x.array.real
         grid.set_active_scalars("u")
-        # plotter.add_mesh(grid, show_edges=True)
+        plotter.add_mesh(grid, show_edges=True)
         warped = grid.warp_by_scalar()
         plotter.add_mesh(warped)
-        setPlotterParameter(plotter, "bird-xy")
+        # setPlotterParameter(plotter, "bird-xy")
 
         if pv.OFF_SCREEN:
             plotter.screenshot("uh_poisson.png")
@@ -242,11 +265,11 @@ class PoissonSolverMixed:
     def plotMesh(self, filename=None):
 
         VuP = functionspace(self.domain, ("CG", 1))
-        VsP = functionspace(self.domain, ("CG", 1, (2,)))
-        uhP = fem.Function(VuP)
-        uhP.interpolate(self.uh)
-        sigmahP = fem.Function(VsP)
-        sigmahP.interpolate(self.sigmah)
+        # VsP = functionspace(self.domain, ("CG", 1, (2,)))
+        # uhP = fem.Function(VuP)
+        # uhP.interpolate(self.uh)
+        # sigmahP = fem.Function(VsP)
+        # sigmahP.interpolate(self.sigmah)
 
         plotter = pv.Plotter(window_size=(1200, 1200))
 

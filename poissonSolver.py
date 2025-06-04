@@ -17,7 +17,7 @@ from ufl import dx, inner, grad
 from ufl import TrialFunction, TestFunction, SpatialCoordinate
 
 import gmsh
-from untils.gmshDomain import lshape
+from untils.gmshDomain import lshape_nonsymm
 from dolfinx.io import gmshio
 
 
@@ -53,7 +53,7 @@ class PoissonSolver:
     def fromLshapeGmsh(n, u_bc, degree, fe_family="Lagrange", u_exact=None):
         gmsh.initialize()
         if MPI.COMM_WORLD.rank == 0:
-            model = lshape(gmsh, n)
+            model = lshape_nonsymm(gmsh, n)
         model = MPI.COMM_WORLD.bcast(model, root=0)
         domain, _, _ = gmshio.model_to_mesh(model, MPI.COMM_WORLD, 0, gdim=2)
         gmsh.finalize()

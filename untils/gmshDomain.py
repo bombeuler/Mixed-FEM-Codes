@@ -83,6 +83,84 @@ def lshape(gmsh, n_nodes=1):
 
     return gmsh.model
 
+def lshape_nonsymm(gmsh,n_nodes):
+    gmsh.option.setNumber("General.Terminal", 0)
+    factory = gmsh.model.geo
+    lc = 1.0
+    p1 = factory.addPoint(-1.0, -1.0, 0.0, lc)
+    p2 = factory.addPoint(0.0, -1.0, 0.0, lc)
+    p3 = factory.addPoint(0.0, 0.0, 0.0, lc)
+    p4 = factory.addPoint(1.0, 0.0, 0.0, lc)
+    p5 = factory.addPoint(1.0, 1.0, 0.0, lc)
+    p6 = factory.addPoint(0.0, 1.0, 0.0, lc)
+    p7 = factory.addPoint(-1.0, 1.0, 0.0, lc)
+    p8 = factory.addPoint(-1.0, 0.0, 0.0, lc)
+
+    l1 = factory.addLine(p1, p2)
+    l2 = factory.addLine(p2, p3)
+    l3 = factory.addLine(p3, p4)
+    l4 = factory.addLine(p4, p5)
+    l5 = factory.addLine(p5, p6)
+    l6 = factory.addLine(p6, p7)
+    l7 = factory.addLine(p7, p8)
+    l8 = factory.addLine(p8, p1)
+
+
+    cl1 = factory.addCurveLoop([l1, l2, l3, l4, l5, l6, l7, l8])
+
+    s1 = factory.addPlaneSurface([cl1])
+
+    factory.synchronize()
+    gmsh.model.addPhysicalGroup(2, [s1], 1, name="l shape")
+
+    meshFact = gmsh.model.mesh
+
+    p = np.array(
+    [
+        [-1, -1, 0],  # Node 1
+        [0, -1, 0],  # Node 2
+        [0, 0, 0],  # Node 3
+        [1, 0, 0],
+        [1, 1, 0],
+        [0, 1, 0],
+        [-1, 1, 0],
+        [-1, 0, 0],
+    ]
+)  # Node 4
+
+    t = np.array(
+    [[1, 2, 3], [1, 3, 8], [8, 3, 6], [8, 6, 7], [3, 4, 5], [3, 5, 6]]
+)  # Triangle 1  # Triangle 2
+
+    node_tags = np.arange(1, len(p) + 1)
+    coords_flat = p.flatten().tolist()
+
+    meshFact.addNodes(
+    dim=2,
+    tag=s1,  # Associate with the outer surface
+    nodeTags=node_tags.tolist(),
+    coord=coords_flat
+)
+
+    # Add custom triangular elements
+    element_tags = np.arange(1, len(t) + 1)
+    element_node_tags = t.flatten().tolist()
+
+    meshFact.addElements(
+    dim=2,
+    tag=s1,  # Associate with the outer surface
+    elementTypes=[2],  # 2D triangle
+    elementTags=[element_tags.tolist()],
+    nodeTags=[element_node_tags]
+)
+
+    loop_flag = np.log2(n_nodes)
+    while(loop_flag > 0):
+        meshFact.refine()
+        loop_flag -=1
+
+    return gmsh.model
+
 def lshape_boundary(gmsh,num_points,size=1):
     num_points += 1
 

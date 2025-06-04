@@ -18,7 +18,7 @@ def plotPiecewiseFunc(uh, plotter):
     d = maxs - mins
     print(f"mins:{mins},maxs:{maxs},d:{d}")
     for ii in range(len(cells)):
-        cell = cells.links(ii)
+        cell = cells[ii,:]
         # value =uh.x.array[ii]
         value = u_values[ii]
         # print(f"value:{value}")

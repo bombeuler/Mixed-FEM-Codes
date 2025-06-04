@@ -80,8 +80,8 @@ class Projection1d:
         A.setOption(PETSc.Mat.Option.NEW_NONZERO_ALLOCATION_ERR, False)
         for i, values in enumerate(A_modify):
             A.setValue(dofs_inner[i], dofs_inner[i], values)
-            if i % 1000 == 0:
-                print(f"All:{dofs_inner.shape[0]},Already:{i}")
+            # if i % 1000 == 0:
+            #     print(f"All:{dofs_inner.shape[0]},Already:{i}")
         A.assemble()
 
         b = assemble_vector(l_form)
