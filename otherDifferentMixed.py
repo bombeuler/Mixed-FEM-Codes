@@ -9,7 +9,7 @@ from basix.ufl import element
 from basix import CellType
 from projection1d import Projection1d
 
-from ufl import dx, inner, grad
+from ufl import dx, inner, grad,div
 from dolfinx import fem
 
 from ufl import SpatialCoordinate
@@ -108,7 +108,7 @@ class OtherDifferentMixedEOC:
 
         # u_W.interpolate(sigma1, nmm_interpolation_data=nmm_data1)
 
-        error_l2 = fem.form(inner(sigma1 - sigma2(x), sigma1 - sigma2(x)) * dx)
+        error_l2 = fem.form(inner(sigma1 - sigma2(x), sigma1 - sigma2(x)) * dx + inner(div(sigma1 - sigma2(x)), div(sigma1 - sigma2(x))) * dx)
         error_l2_local = fem.assemble_scalar(error_l2)
         error_l2_global = comm.allreduce(error_l2_local, op=MPI.SUM)
         error_l2 = np.sqrt(error_l2_global)
